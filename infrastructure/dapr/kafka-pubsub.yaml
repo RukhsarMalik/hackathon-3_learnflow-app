@@ -1,0 +1,19 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: learnflow
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      value: "kafka.kafka.svc.cluster.local:9092"
+    - name: consumerGroup
+      value: "learnflow"
+    - name: authType
+      value: "none"
+    - name: initialOffset
+      value: "newest"
+    - name: maxMessageBytes
+      value: "1024"

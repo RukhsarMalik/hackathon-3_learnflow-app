@@ -1,0 +1,15 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+  namespace: default
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+  - name: brokers
+    value: "kafka.kafka.svc.cluster.local:9092"
+  - name: consumerGroup
+    value: "progress-service"
+  - name: authRequired
+    value: "false"

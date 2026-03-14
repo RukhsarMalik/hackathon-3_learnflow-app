@@ -1,0 +1,156 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-gateway
+  namespace: learnflow
+  labels:
+    app: kong-gateway
+spec:
+  type: NodePort
+  selector:
+    app: kong-gateway
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      nodePort: 30080
+    - name: admin
+      port: 8001
+      targetPort: 8001
+      nodePort: 30081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong-gateway
+  namespace: learnflow
+  labels:
+    app: kong-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kong-gateway
+  template:
+    metadata:
+      labels:
+        app: kong-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: kong
+          image: kong:3.4-alpine
+          ports:
+            - containerPort: 8000
+            - containerPort: 8001
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: "/kong/config/kong.yaml"
+            - name: KONG_PROXY_ACCESS_LOG
+              value: "/dev/stdout"
+            - name: KONG_ADMIN_ACCESS_LOG
+              value: "/dev/stdout"
+            - name: KONG_PROXY_ERROR_LOG
+              value: "/dev/stderr"
+            - name: KONG_ADMIN_ERROR_LOG
+              value: "/dev/stderr"
+            - name: KONG_ADMIN_LISTEN
+              value: "0.0.0.0:8001"
+          volumeMounts:
+            - name: kong-config
+              mountPath: /kong/config
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+      volumes:
+        - name: kong-config
+          configMap:
+            name: kong-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-config
+  namespace: learnflow
+data:
+  kong.yaml: |
+    _format_version: "3.0"
+    _transform: true
+
+    services:
+      - name: triage-service
+        url: http://triage-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: triage-route
+            paths:
+              - /triage
+            strip_path: true
+        plugins:
+          - name: jwt
+
+      - name: concepts-service
+        url: http://concepts-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: concepts-route
+            paths:
+              - /concepts
+            strip_path: true
+        plugins:
+          - name: jwt
+
+      - name: code-review-service
+        url: http://code-review-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: code-review-route
+            paths:
+              - /code-review
+            strip_path: true
+        plugins:
+          - name: jwt
+
+      - name: debug-service
+        url: http://debug-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: debug-route
+            paths:
+              - /debug
+            strip_path: true
+        plugins:
+          - name: jwt
+
+      - name: exercise-service
+        url: http://exercise-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: exercise-route
+            paths:
+              - /exercise
+            strip_path: true
+        plugins:
+          - name: jwt
+
+      - name: progress-service
+        url: http://progress-service.learnflow.svc.cluster.local:8000
+        routes:
+          - name: progress-route
+            paths:
+              - /progress
+            strip_path: true
+          - name: events-route
+            paths:
+              - /events
+            strip_path: true
+        plugins:
+          - name: jwt

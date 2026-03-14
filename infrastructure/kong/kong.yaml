@@ -1,0 +1,77 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: triage-service
+    url: http://triage-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: triage-route
+        paths:
+          - /triage
+        strip_path: true
+    plugins:
+      - name: jwt
+
+  - name: concepts-service
+    url: http://concepts-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: concepts-route
+        paths:
+          - /concepts
+        strip_path: true
+    plugins:
+      - name: jwt
+
+  - name: code-review-service
+    url: http://code-review-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: code-review-route
+        paths:
+          - /code-review
+        strip_path: true
+    plugins:
+      - name: jwt
+
+  - name: debug-service
+    url: http://debug-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: debug-route
+        paths:
+          - /debug
+        strip_path: true
+    plugins:
+      - name: jwt
+
+  - name: exercise-service
+    url: http://exercise-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: exercise-route
+        paths:
+          - /exercise
+        strip_path: true
+    plugins:
+      - name: jwt
+
+  - name: progress-service
+    url: http://progress-service.learnflow.svc.cluster.local:8000
+    routes:
+      - name: progress-route
+        paths:
+          - /progress
+        strip_path: true
+      - name: events-route
+        paths:
+          - /events
+        strip_path: true
+    plugins:
+      - name: jwt
+
+plugins:
+  - name: jwt
+    config:
+      secret_is_base64: false
+      claims_to_verify:
+        - exp
+      header_names:
+        - Authorization
+      key_claim_name: kid
