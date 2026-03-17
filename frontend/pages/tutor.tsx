@@ -1,23 +1,9 @@
-// T030: Student chat interface with Monaco Editor and AI tutor
-import { useState, useRef } from "react";
-import Editor from "@monaco-editor/react";
+import { useState, useRef, useEffect } from "react";
+import dynamic from "next/dynamic";
+
+const Editor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 const KONG_URL = process.env.NEXT_PUBLIC_KONG_URL || "http://localhost:30080";
-
-interface TutorResponse {
-  routed_to: string;
-  confidence: number;
-  topic: string;
-  classification: string;
-  struggle_triggered: boolean;
-}
-
-interface ExplainResponse {
-  explanation: string;
-  code_example: string;
-  topic: string;
-  student_level: string;
-}
 
 interface Message {
   role: "student" | "tutor";
@@ -26,193 +12,180 @@ interface Message {
 }
 
 export default function TutorPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    { role: "tutor", content: "👋 Hi! I'm your AI Python tutor. Ask me anything about Python — concepts, debugging, or exercises!" }
+  ]);
   const [input, setInput] = useState("");
-  const [code, setCode] = useState("# Write your Python code here\n");
+  const [code, setCode] = useState("# Write your Python code here\nprint('Hello, World!')\n");
   const [loading, setLoading] = useState(false);
   const [runOutput, setRunOutput] = useState("");
   const sessionId = useRef(`session-${Date.now()}`);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const getToken = () => localStorage.getItem("auth_token") || "";
+  const getToken = () => typeof window !== "undefined" ? localStorage.getItem("auth_token") || "" : "";
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function sendMessage() {
-    if (!input.trim()) return;
-    const userMsg: Message = { role: "student", content: input };
-    setMessages((prev) => [...prev, userMsg]);
+    if (!input.trim() || loading) return;
+    const text = input.trim();
+    setMessages(prev => [...prev, { role: "student", content: text }]);
     setInput("");
     setLoading(true);
 
     try {
-      // Step 1: Triage
       const triageRes = await fetch(`${KONG_URL}/triage/route`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          message: input,
-          session_id: sessionId.current,
-          student_level: "beginner",
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ message: text, session_id: sessionId.current, student_level: "beginner" }),
       });
-      const triage: TutorResponse = await triageRes.json();
+      const triage = await triageRes.json();
 
-      // Step 2: Get explanation from concepts-service
       const explainRes = await fetch(`${KONG_URL}/concepts/explain`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          message: input,
-          topic: triage.topic,
-          student_level: "beginner",
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ message: text, topic: triage.topic, student_level: "beginner" }),
       });
-      const explain: ExplainResponse = await explainRes.json();
+      const explain = await explainRes.json();
 
-      const tutorMsg: Message = {
+      setMessages(prev => [...prev, {
         role: "tutor",
         content: explain.explanation,
         codeExample: explain.code_example,
-      };
-      setMessages((prev) => [...prev, tutorMsg]);
+      }]);
 
       if (triage.struggle_triggered) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "tutor",
-            content: "I noticed you might be struggling — your teacher has been alerted and will check in soon.",
-          },
-        ]);
+        setMessages(prev => [...prev, {
+          role: "tutor",
+          content: "💡 I noticed you might be struggling — your teacher has been notified to check in with you!",
+        }]);
       }
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "tutor", content: `Error: ${err}. Please try again.` },
-      ]);
+      setMessages(prev => [...prev, { role: "tutor", content: `❌ Error: ${err}. Please try again.` }]);
     } finally {
       setLoading(false);
     }
   }
 
   async function runCode() {
-    setRunOutput("Running...");
+    setRunOutput("⏳ Running...");
     try {
       const res = await fetch(`${KONG_URL}/exercise/grade`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          exercise_id: "sandbox-run",
-          code,
-          test_input: "",
-          test_expected: "",
-          topic: "sandbox",
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ exercise_id: "sandbox-run", code, test_input: "", test_expected: "", topic: "sandbox" }),
       });
       const result = await res.json();
       setRunOutput(result.execution_output || result.feedback || JSON.stringify(result));
     } catch (err) {
-      setRunOutput(`Run error: ${err}`);
+      setRunOutput(`❌ Run error: ${err}`);
     }
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif" }}>
-      {/* Chat panel */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 16, borderRight: "1px solid #ddd" }}>
-        <h2 style={{ margin: "0 0 12px" }}>Python AI Tutor</h2>
-        <div style={{ flex: 1, overflowY: "auto", marginBottom: 12 }}>
+    <div style={{ display: "flex", height: "calc(100vh - 64px)", gap: 0 }}>
+      {/* Chat Panel */}
+      <div style={{ width: "45%", display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)" }}>
+        {/* Header */}
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", background: "var(--card)" }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>🤖 AI Python Tutor</h2>
+          <p style={{ color: "var(--text2)", fontSize: 13 }}>Ask anything about Python</p>
+        </div>
+
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           {messages.map((m, i) => (
-            <div key={i} style={{ marginBottom: 12, textAlign: m.role === "student" ? "right" : "left" }}>
-              <div
-                style={{
-                  display: "inline-block",
-                  background: m.role === "student" ? "#0070f3" : "#f0f0f0",
-                  color: m.role === "student" ? "#fff" : "#000",
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  maxWidth: "80%",
-                }}
-              >
-                {m.content}
+            <div key={i} style={{ display: "flex", justifyContent: m.role === "student" ? "flex-end" : "flex-start" }}>
+              <div style={{ maxWidth: "80%" }}>
+                {m.role === "tutor" && (
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4, paddingLeft: 4 }}>AI Tutor</div>
+                )}
+                <div className={m.role === "student" ? "chat-bubble-student" : "chat-bubble-tutor"}>
+                  {m.content}
+                </div>
+                {m.codeExample && (
+                  <pre style={{
+                    background: "#0d1117", color: "#e6edf3", padding: "12px 14px",
+                    borderRadius: "0 0 12px 12px", fontSize: 13, overflowX: "auto",
+                    marginTop: 2, border: "1px solid var(--border)", borderTop: "none",
+                    lineHeight: 1.6,
+                  }}>
+                    {m.codeExample}
+                  </pre>
+                )}
               </div>
-              {m.codeExample && (
-                <pre
-                  style={{
-                    background: "#1e1e1e",
-                    color: "#d4d4d4",
-                    padding: 12,
-                    borderRadius: 6,
-                    fontSize: 13,
-                    textAlign: "left",
-                    marginTop: 8,
-                    overflowX: "auto",
-                  }}
-                >
-                  {m.codeExample}
-                </pre>
-              )}
             </div>
           ))}
-          {loading && <div style={{ color: "#999" }}>Thinking...</div>}
+          {loading && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text3)", fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{
+                    width: 6, height: 6, borderRadius: "50%", background: "var(--primary)",
+                    animation: "pulse 1s infinite", animationDelay: `${i * 0.2}s`, opacity: 0.6,
+                  }} />
+                ))}
+              </div>
+              Thinking...
+            </div>
+          )}
+          <div ref={chatEndRef} />
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+
+        {/* Input */}
+        <div style={{ padding: "16px 24px", borderTop: "1px solid var(--border)", background: "var(--card)", display: "flex", gap: 10 }}>
           <input
+            className="input"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && sendMessage()}
             placeholder="Ask a Python question..."
-            style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14 }}
-          />
-          <button
-            onClick={sendMessage}
             disabled={loading}
-            style={{ padding: "8px 16px", background: "#0070f3", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-          >
-            Send
+          />
+          <button className="btn btn-primary" onClick={sendMessage} disabled={loading} style={{ whiteSpace: "nowrap" }}>
+            Send ↑
           </button>
         </div>
       </div>
 
-      {/* Code editor panel */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: 16 }}>
-        <h2 style={{ margin: "0 0 12px" }}>Code Editor</h2>
-        <div style={{ flex: 1, border: "1px solid #ddd", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
+      {/* Editor Panel */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        {/* Header */}
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", background: "var(--card)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>💻 Code Editor</h2>
+            <p style={{ color: "var(--text2)", fontSize: 13 }}>Write and run Python code</p>
+          </div>
+          <button className="btn btn-success" onClick={runCode}>▶ Run Code</button>
+        </div>
+
+        {/* Editor */}
+        <div style={{ flex: 1, overflow: "hidden" }}>
           <Editor
             height="100%"
             defaultLanguage="python"
             value={code}
-            onChange={(v) => setCode(v || "")}
+            onChange={v => setCode(v || "")}
             theme="vs-dark"
-            options={{ minimap: { enabled: false }, fontSize: 14 }}
+            options={{ minimap: { enabled: false }, fontSize: 14, padding: { top: 12 }, scrollBeyondLastLine: false }}
           />
         </div>
-        <button
-          onClick={runCode}
-          style={{ padding: "8px 16px", background: "#00a550", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", marginBottom: 8 }}
-        >
-          Run Code
-        </button>
-        <pre
-          style={{
-            background: "#1e1e1e",
-            color: "#d4d4d4",
-            padding: 12,
-            borderRadius: 6,
-            minHeight: 80,
-            fontSize: 13,
-            overflowX: "auto",
-          }}
-        >
-          {runOutput || "Output will appear here..."}
-        </pre>
+
+        {/* Output */}
+        <div style={{ borderTop: "1px solid var(--border)" }}>
+          <div style={{ padding: "10px 16px", background: "var(--card2)", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", fontWeight: 600, letterSpacing: 0.5 }}>
+            OUTPUT
+          </div>
+          <pre style={{
+            background: "#0d1117", color: "#e6edf3", padding: "14px 16px",
+            fontSize: 13, minHeight: 80, maxHeight: 160, overflowY: "auto",
+            lineHeight: 1.6, fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          }}>
+            {runOutput || "// Output will appear here after running code"}
+          </pre>
+        </div>
       </div>
     </div>
   );

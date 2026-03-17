@@ -3,18 +3,34 @@ import logging
 import json
 import time
 import uuid
+import httpx
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from dapr.clients import DaprClient
 from agents import Agent, Runner
 import uvicorn
 from prometheus_client import Counter, Histogram, make_asgi_app
 from sandbox import run_code, SandboxError
 
+PROGRESS_SERVICE_URL = os.getenv("PROGRESS_SERVICE_URL", "http://progress-service:8000")
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+async def _publish_event(pubsub_name, topic_name, data, data_content_type="application/json"):
+    """Non-blocking Dapr publish — skips if Dapr sidecar is unavailable."""
+    import asyncio
+    def _sync_publish():
+        from dapr.clients import DaprClient
+        with DaprClient() as dapr:
+            dapr.publish_event(pubsub_name=pubsub_name, topic_name=topic_name,
+                               data=data, data_content_type=data_content_type)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_sync_publish), timeout=2.0)
+    except Exception as e:
+        logger.warning(f"Dapr publish skipped ({topic_name}): {e}")
+
 
 app = FastAPI(title="exercise-service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -116,9 +132,7 @@ async def generate_exercise(
 
     # T041: Publish exercise.generated event
     try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
+        await _publish_event(pubsub_name=DAPR_PUBSUB,
                 topic_name="exercise.generated",
                 data=json.dumps({
                     "exercise_id": exercise_id,
@@ -187,9 +201,7 @@ async def grade_exercise(
     # T041: Publish exercise.completed or exercise.failed
     event_topic = "exercise.completed" if grade == "pass" else "exercise.failed"
     try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
+        await _publish_event(pubsub_name=DAPR_PUBSUB,
                 topic_name=event_topic,
                 data=json.dumps({
                     "exercise_id": req.exercise_id,
@@ -202,6 +214,47 @@ async def grade_exercise(
             )
     except Exception as e:
         logger.error(f"Kafka publish failed: {e}. Progress tracking temporarily offline.")
+
+    # Direct HTTP fallback to progress-service (in case Dapr/Kafka unavailable)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.post(
+                f"{PROGRESS_SERVICE_URL}/events/exercise.completed",
+                json={"student_id": student_id, "topic": req.topic, "grade": grade, "score": score},
+            )
+    except Exception as e:
+        logger.warning(f"Direct progress update skipped: {e}")
+
+    # Auto code review → update code_quality
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            review_res = await client.post(
+                "http://code-review-service:8000/review",
+                json={"code": req.code, "student_id": student_id, "topic": req.topic, "exercise_id": req.exercise_id},
+            )
+            logger.info(f"Code review response: {review_res.status_code}")
+            if review_res.status_code == 200:
+                review_grade = review_res.json().get("grade", "partial")
+                logger.info(f"Code review grade: {review_grade}, updating progress for {student_id}")
+                progress_res = await client.post(
+                    f"{PROGRESS_SERVICE_URL}/events/code.review.completed",
+                    json={"student_id": student_id, "topic": req.topic, "grade": review_grade},
+                )
+                logger.info(f"Progress code_quality update: {progress_res.status_code}")
+            else:
+                logger.warning(f"Code review returned {review_res.status_code}: {review_res.text}")
+    except Exception as e:
+        logger.warning(f"Code review skipped: {e}")
+
+    # Update consistency_streak (student is active)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            await client.post(
+                f"{PROGRESS_SERVICE_URL}/mastery/update",
+                json={"student_id": student_id, "topic": req.topic, "component": "consistency_streak", "value": 1.0},
+            )
+    except Exception as e:
+        logger.warning(f"Consistency update skipped: {e}")
 
     REQUEST_COUNT.labels(op="grade").inc()
     REQUEST_LATENCY.labels(op="grade").observe(time.time() - start)

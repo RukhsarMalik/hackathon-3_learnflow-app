@@ -5,13 +5,26 @@ import time
 from fastapi import FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dapr.clients import DaprClient
 from agents import Agent, Runner
 import uvicorn
 from prometheus_client import Counter, Histogram, make_asgi_app
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+async def _publish_event(pubsub_name, topic_name, data, data_content_type="application/json"):
+    """Non-blocking Dapr publish — skips if Dapr sidecar is unavailable."""
+    import asyncio
+    def _sync_publish():
+        from dapr.clients import DaprClient
+        with DaprClient() as dapr:
+            dapr.publish_event(pubsub_name=pubsub_name, topic_name=topic_name,
+                               data=data, data_content_type=data_content_type)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_sync_publish), timeout=2.0)
+    except Exception as e:
+        logger.warning(f"Dapr publish skipped ({topic_name}): {e}")
+
 
 app = FastAPI(title="concepts-service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -91,9 +104,7 @@ async def explain_concept(
 
     # T028: Publish learning.concept.delivered event
     try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
+        await _publish_event(pubsub_name=DAPR_PUBSUB,
                 topic_name="learning.concept.delivered",
                 data=json.dumps({
                     "student_id": x_student_id or req.student_id,

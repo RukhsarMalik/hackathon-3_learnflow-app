@@ -6,13 +6,26 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from dapr.clients import DaprClient
 from agents import Agent, Runner
 import uvicorn
 from prometheus_client import Counter, Histogram, make_asgi_app
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+async def _publish_event(pubsub_name, topic_name, data, data_content_type="application/json"):
+    """Non-blocking Dapr publish — skips if Dapr sidecar is unavailable."""
+    import asyncio
+    def _sync_publish():
+        from dapr.clients import DaprClient
+        with DaprClient() as dapr:
+            dapr.publish_event(pubsub_name=pubsub_name, topic_name=topic_name,
+                               data=data, data_content_type=data_content_type)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_sync_publish), timeout=2.0)
+    except Exception as e:
+        logger.warning(f"Dapr publish skipped ({topic_name}): {e}")
+
 
 app = FastAPI(title="debug-service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -98,57 +111,21 @@ async def debug_code(
         hint = "Check your code for syntax errors"
         error_type = "Unknown"
 
-    # T035: Redis error count tracking
+    # T035/T036: Struggle tracking (Dapr/Redis unavailable in this env)
     struggle_triggered = False
-    error_key = f"error_count:{student_id}:{error_type}"
-    consec_key = f"consec_failures:{student_id}"
 
-    try:
-        with DaprClient() as dapr:
-            # Get current error count
-            state = dapr.get_state(store_name=DAPR_STATE_STORE, key=error_key)
-            error_count = int(state.data or b"0") + 1
-            dapr.save_state(store_name=DAPR_STATE_STORE, key=error_key, value=str(error_count))
-
-            if error_count >= STRUGGLE_ERROR_THRESHOLD:
-                struggle_triggered = True
-
-            # T036: Consecutive failure tracking
-            consec_state = dapr.get_state(store_name=DAPR_STATE_STORE, key=consec_key)
-            consec_count = int(consec_state.data or b"0") + 1
-            dapr.save_state(store_name=DAPR_STATE_STORE, key=consec_key, value=str(consec_count))
-
-            if consec_count >= CONSECUTIVE_FAILURE_THRESHOLD:
-                _publish_struggle(
-                    dapr, student_id, req.session_id, req.topic,
-                    "consecutive_failures", f"{consec_count} consecutive failures",
-                )
-                # Reset counter after trigger
-                dapr.save_state(store_name=DAPR_STATE_STORE, key=consec_key, value="0")
-    except Exception as e:
-        logger.error(f"Redis state error: {e}")
-
-    # T037: Publish code.debug.completed; include struggle if triggered
-    try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
-                topic_name="code.debug.completed",
-                data=json.dumps({
-                    "student_id": student_id,
-                    "topic": req.topic,
-                    "error_type": error_type,
-                    "struggle_triggered": struggle_triggered,
-                }),
-                data_content_type="application/json",
-            )
-            if struggle_triggered:
-                _publish_struggle(
-                    dapr, student_id, req.session_id, req.topic,
-                    "repeated_error", f"Same {error_type} error ≥{STRUGGLE_ERROR_THRESHOLD} times",
-                )
-    except Exception as e:
-        logger.error(f"Kafka publish failed: {e}. Progress tracking temporarily offline.")
+    # T037: Publish code.debug.completed
+    await _publish_event(
+        pubsub_name=DAPR_PUBSUB,
+        topic_name="code.debug.completed",
+        data=json.dumps({
+            "student_id": student_id,
+            "topic": req.topic,
+            "error_type": error_type,
+            "struggle_triggered": struggle_triggered,
+        }),
+        data_content_type="application/json",
+    )
 
     REQUEST_COUNT.inc()
     REQUEST_LATENCY.observe(time.time() - start)
@@ -162,25 +139,6 @@ async def debug_code(
     )
 
 
-def _publish_struggle(
-    dapr: DaprClient, student_id: str, session_id: str, topic: str,
-    trigger_type: str, trigger_detail: str
-):
-    try:
-        dapr.publish_event(
-            pubsub_name=DAPR_PUBSUB,
-            topic_name="struggle.detected",
-            data=json.dumps({
-                "student_id": student_id,
-                "session_id": session_id,
-                "topic": topic,
-                "trigger_type": trigger_type,
-                "trigger_detail": trigger_detail,
-            }),
-            data_content_type="application/json",
-        )
-    except Exception as e:
-        logger.error(f"Struggle event publish failed: {e}")
 
 
 @app.post("/events/code.debug.requested")

@@ -1,4 +1,3 @@
-// T047: Student progress page — mastery profile with per-topic levels and component scores
 import { useEffect, useState } from "react";
 
 const KONG_URL = process.env.NEXT_PUBLIC_KONG_URL || "http://localhost:30080";
@@ -19,28 +18,28 @@ interface MasteryProfile {
 }
 
 const LEVEL_COLORS: Record<string, string> = {
-  Mastered: "#00a550",
-  Proficient: "#0070f3",
-  Learning: "#f0a500",
-  Beginner: "#e53e3e",
+  Mastered: "#51cf66",
+  Proficient: "#6c63ff",
+  Learning: "#ffa94d",
+  Beginner: "#ff6b6b",
 };
 
-const LEVEL_BARS: Record<string, number> = {
-  Mastered: 100,
-  Proficient: 75,
-  Learning: 50,
-  Beginner: 25,
+const LEVEL_ICONS: Record<string, string> = {
+  Mastered: "🏆",
+  Proficient: "⭐",
+  Learning: "📚",
+  Beginner: "🌱",
 };
 
-function ComponentBar({ label, value }: { label: string; value: number }) {
+function Bar({ label, value, color = "var(--primary)" }: { label: string; value: number; color?: string }) {
   return (
-    <div style={{ marginBottom: 4 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#555" }}>
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text2)", marginBottom: 5 }}>
         <span>{label}</span>
-        <span>{Math.round(value * 100)}%</span>
+        <span style={{ fontWeight: 600, color: "var(--text)" }}>{Math.round(value * 100)}%</span>
       </div>
-      <div style={{ background: "#e2e8f0", borderRadius: 4, height: 6, overflow: "hidden" }}>
-        <div style={{ width: `${value * 100}%`, background: "#0070f3", height: "100%", transition: "width 0.3s" }} />
+      <div className="progress-bar-wrap">
+        <div className="progress-bar-fill" style={{ width: `${value * 100}%`, background: color }} />
       </div>
     </div>
   );
@@ -51,14 +50,13 @@ export default function ProgressPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const getToken = () => localStorage.getItem("auth_token") || "";
-  const getStudentId = () => localStorage.getItem("student_id") || "demo-student";
+  const getToken = () => typeof window !== "undefined" ? localStorage.getItem("auth_token") || "" : "";
+  const getStudentId = () => typeof window !== "undefined" ? localStorage.getItem("student_id") || "00000000-0000-0000-0000-000000000001" : "00000000-0000-0000-0000-000000000001";
 
   useEffect(() => {
     async function fetchProfile() {
       try {
-        const studentId = getStudentId();
-        const res = await fetch(`${KONG_URL}/progress/mastery/${studentId}`, {
+        const res = await fetch(`${KONG_URL}/progress/mastery/${getStudentId()}`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
         const data = await res.json();
@@ -73,60 +71,90 @@ export default function ProgressPage() {
     fetchProfile();
   }, []);
 
-  if (loading) return <div style={{ textAlign: "center", padding: 60, fontFamily: "sans-serif" }}>Loading progress...</div>;
-  if (error) return <div style={{ color: "#c00", padding: 24, fontFamily: "sans-serif" }}>Error: {error}</div>;
-  if (!profile || profile.topics.length === 0) {
-    return <div style={{ textAlign: "center", padding: 60, color: "#999", fontFamily: "sans-serif" }}>No progress data yet. Complete some exercises to see your mastery levels!</div>;
-  }
+  // Summary stats
+  const avgMastery = profile?.topics.length
+    ? profile.topics.reduce((s, t) => s + t.mastery_score, 0) / profile.topics.length
+    : 0;
+  const topicCount = profile?.topics.length || 0;
+  const masteredCount = profile?.topics.filter(t => t.mastery_level === "Mastered").length || 0;
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
-      <h1>My Python Progress</h1>
-      <p style={{ color: "#555" }}>Student ID: {profile.student_id}</p>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16, marginTop: 20 }}>
-        {profile.topics.map((t) => {
-          const levelColor = LEVEL_COLORS[t.mastery_level] || "#999";
-          return (
-            <div key={t.topic} style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h3 style={{ margin: 0, fontSize: 16 }}>{t.topic.replace(/_/g, " ")}</h3>
-                <span
-                  style={{
-                    background: levelColor,
-                    color: "#fff",
-                    padding: "3px 10px",
-                    borderRadius: 12,
-                    fontSize: 12,
-                    fontWeight: 600,
-                  }}
-                >
-                  {t.mastery_level}
-                </span>
-              </div>
-
-              <div style={{ background: "#e2e8f0", borderRadius: 6, height: 10, overflow: "hidden", marginBottom: 12 }}>
-                <div
-                  style={{
-                    width: `${t.mastery_score * 100}%`,
-                    background: levelColor,
-                    height: "100%",
-                    transition: "width 0.4s",
-                  }}
-                />
-              </div>
-              <div style={{ fontSize: 13, color: "#666", marginBottom: 12 }}>
-                Overall: <strong>{Math.round(t.mastery_score * 100)}%</strong>
-              </div>
-
-              <ComponentBar label="Exercise completion (×0.40)" value={t.exercise_completion} />
-              <ComponentBar label="Quiz score (×0.30)" value={t.quiz_score} />
-              <ComponentBar label="Code quality (×0.20)" value={t.code_quality} />
-              <ComponentBar label="Consistency streak (×0.10)" value={t.consistency_streak} />
-            </div>
-          );
-        })}
+    <div className="container">
+      <div className="page-header">
+        <h1>📈 My Progress</h1>
+        <p>Track your Python mastery across all topics</p>
       </div>
+
+      {loading ? (
+        <div className="card spinner">
+          <div style={{ fontSize: 32 }}>⏳</div>
+          <span>Loading your progress...</span>
+        </div>
+      ) : error ? (
+        <div className="alert alert-error">⚠ {error}</div>
+      ) : !profile || profile.topics.length === 0 ? (
+        <div className="card" style={{ textAlign: "center", padding: "60px 24px" }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🌱</div>
+          <h3 style={{ fontWeight: 600, marginBottom: 8 }}>No progress yet</h3>
+          <p style={{ color: "var(--text2)", fontSize: 14 }}>
+            Complete some exercises to see your mastery levels here!
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Stats Row */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 32 }}>
+            <div className="stat-card">
+              <div className="stat-card-value gradient-text">{Math.round(avgMastery * 100)}%</div>
+              <div className="stat-card-label">Average Mastery</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value" style={{ color: "var(--secondary)" }}>{topicCount}</div>
+              <div className="stat-card-label">Topics Studied</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-card-value" style={{ color: "#51cf66" }}>{masteredCount}</div>
+              <div className="stat-card-label">Topics Mastered</div>
+            </div>
+          </div>
+
+          {/* Topic Cards */}
+          <div className="grid-3">
+            {profile.topics.map(t => {
+              const color = LEVEL_COLORS[t.mastery_level] || "#999";
+              const icon = LEVEL_ICONS[t.mastery_level] || "📖";
+              return (
+                <div key={t.topic} className="card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                    <h3 style={{ fontSize: 15, fontWeight: 700 }}>{t.topic.replace(/_/g, " ")}</h3>
+                    <span className="badge" style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}>
+                      {icon} {t.mastery_level}
+                    </span>
+                  </div>
+
+                  {/* Overall bar */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+                      <span style={{ color: "var(--text2)" }}>Overall Mastery</span>
+                      <span style={{ fontWeight: 700, color }}>{Math.round(t.mastery_score * 100)}%</span>
+                    </div>
+                    <div className="progress-bar-wrap" style={{ height: 10 }}>
+                      <div className="progress-bar-fill" style={{ width: `${t.mastery_score * 100}%`, background: color }} />
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+                    <Bar label="Exercises (×0.40)" value={t.exercise_completion} color={color} />
+                    <Bar label="Quiz Score (×0.30)" value={t.quiz_score} color={color} />
+                    <Bar label="Code Quality (×0.20)" value={t.code_quality} color={color} />
+                    <Bar label="Consistency (×0.10)" value={t.consistency_streak} color={color} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

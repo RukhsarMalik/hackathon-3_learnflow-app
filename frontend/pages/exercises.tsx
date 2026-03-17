@@ -1,6 +1,4 @@
-// T046: Exercise display with Monaco Editor, grade submission, result feedback
 import { useState } from "react";
-import Editor from "@monaco-editor/react";
 
 const KONG_URL = process.env.NEXT_PUBLIC_KONG_URL || "http://localhost:30080";
 
@@ -19,27 +17,32 @@ interface GradeResult {
   feedback: string;
 }
 
+const TOPICS = [
+  "for_loops", "while_loops", "functions", "lists",
+  "dictionaries", "classes", "list_comprehensions", "recursion"
+];
+
 export default function ExercisesPage() {
   const [topic, setTopic] = useState("for_loops");
   const [exercise, setExercise] = useState<Exercise | null>(null);
   const [code, setCode] = useState("# Write your solution here\n");
   const [gradeResult, setGradeResult] = useState<GradeResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [grading, setGrading] = useState(false);
   const [error, setError] = useState("");
 
-  const getToken = () => localStorage.getItem("auth_token") || "";
+  const getToken = () => typeof window !== "undefined" ? localStorage.getItem("auth_token") || "" : "";
+  const getStudentId = () => typeof window !== "undefined" ? localStorage.getItem("student_id") || "00000000-0000-0000-0000-000000000001" : "00000000-0000-0000-0000-000000000001";
 
   async function generateExercise() {
     setLoading(true);
     setError("");
     setGradeResult(null);
+    setExercise(null);
     try {
       const res = await fetch(`${KONG_URL}/exercise/generate`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ topic, student_level: "beginner" }),
       });
       const data = await res.json();
@@ -55,22 +58,13 @@ export default function ExercisesPage() {
 
   async function submitSolution() {
     if (!exercise) return;
-    setLoading(true);
+    setGrading(true);
     setError("");
     try {
       const res = await fetch(`${KONG_URL}/exercise/grade`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          exercise_id: exercise.exercise_id,
-          code,
-          test_input: exercise.test_input,
-          test_expected: exercise.test_expected,
-          topic,
-        }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ exercise_id: exercise.exercise_id, code, test_input: exercise.test_input, test_expected: exercise.test_expected, topic, student_id: getStudentId() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail?.message || "Grading failed");
@@ -78,94 +72,142 @@ export default function ExercisesPage() {
     } catch (err) {
       setError(`${err}`);
     } finally {
-      setLoading(false);
+      setGrading(false);
     }
   }
 
   const gradeColor = gradeResult
-    ? gradeResult.grade === "pass" ? "#00a550" : gradeResult.grade === "partial" ? "#f0a500" : "#e53e3e"
-    : "#000";
+    ? gradeResult.grade === "pass" ? "var(--success)" : gradeResult.grade === "partial" ? "var(--warning)" : "var(--danger)"
+    : "";
+  const gradeIcon = gradeResult
+    ? gradeResult.grade === "pass" ? "✅" : gradeResult.grade === "partial" ? "🔶" : "❌"
+    : "";
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
-      <h1>Python Exercises</h1>
+    <div className="container">
+      <div className="page-header">
+        <h1>💻 Python Exercises</h1>
+        <p>Generate AI-powered exercises and get instant feedback</p>
+      </div>
 
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center" }}>
-        <select
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14 }}
-        >
-          {["for_loops", "while_loops", "functions", "lists", "dictionaries", "classes", "list_comprehensions", "recursion"].map((t) => (
-            <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
+      {/* Topic Selector */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 14, color: "var(--text2)" }}>SELECT TOPIC</h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+          {TOPICS.map(t => (
+            <button
+              key={t}
+              onClick={() => setTopic(t)}
+              className="btn"
+              style={{
+                background: topic === t ? "var(--primary)" : "var(--bg2)",
+                color: topic === t ? "#fff" : "var(--text2)",
+                border: `1px solid ${topic === t ? "var(--primary)" : "var(--border)"}`,
+                fontSize: 13,
+              }}
+            >
+              {t.replace(/_/g, " ")}
+            </button>
           ))}
-        </select>
-        <button
-          onClick={generateExercise}
-          disabled={loading}
-          style={{ padding: "8px 20px", background: "#0070f3", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-        >
-          {loading ? "Generating..." : "New Exercise"}
+        </div>
+        <button className="btn btn-primary btn-lg" onClick={generateExercise} disabled={loading}>
+          {loading ? "⏳ Generating..." : "✨ Generate Exercise"}
         </button>
       </div>
 
-      {error && <div style={{ background: "#fee", color: "#c00", padding: 12, borderRadius: 6, marginBottom: 16 }}>{error}</div>}
+      {error && <div className="alert alert-error">⚠ {error}</div>}
 
       {exercise && (
-        <>
-          <div style={{ background: "#f8f9fa", border: "1px solid #e2e8f0", borderRadius: 8, padding: 16, marginBottom: 16 }}>
-            <h3 style={{ margin: "0 0 8px" }}>Exercise: {topic.replace(/_/g, " ")}</h3>
-            <p style={{ margin: 0, lineHeight: 1.6 }}>{exercise.problem}</p>
-            {exercise.expected_output && (
-              <div style={{ marginTop: 8 }}>
-                <strong>Expected output:</strong>
-                <pre style={{ background: "#eee", padding: 8, borderRadius: 4, margin: "4px 0 0" }}>{exercise.expected_output}</pre>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          {/* Problem */}
+          <div>
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700 }}>📋 Problem</h3>
+                <span className="badge" style={{ background: "var(--primary)22", color: "var(--primary)", border: "1px solid var(--primary)44" }}>
+                  {topic.replace(/_/g, " ")}
+                </span>
               </div>
-            )}
-          </div>
-
-          <div style={{ border: "1px solid #ddd", borderRadius: 8, overflow: "hidden", marginBottom: 12 }}>
-            <Editor
-              height="300px"
-              defaultLanguage="python"
-              value={code}
-              onChange={(v) => setCode(v || "")}
-              theme="vs-dark"
-              options={{ minimap: { enabled: false }, fontSize: 14 }}
-            />
-          </div>
-
-          <button
-            onClick={submitSolution}
-            disabled={loading}
-            style={{ padding: "10px 24px", background: "#00a550", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 15 }}
-          >
-            {loading ? "Grading..." : "Submit Solution"}
-          </button>
-
-          {gradeResult && (
-            <div style={{ marginTop: 16, padding: 16, borderRadius: 8, border: `2px solid ${gradeColor}`, background: "#fff" }}>
-              <h3 style={{ color: gradeColor, margin: "0 0 8px" }}>
-                {gradeResult.grade === "pass" ? "✓ Passed!" : gradeResult.grade === "partial" ? "~ Partial Credit" : "✗ Failed"}
-                {" "}({Math.round(gradeResult.score * 100)}%)
-              </h3>
-              <p style={{ margin: "0 0 8px" }}>{gradeResult.feedback}</p>
-              {gradeResult.execution_output && (
-                <div>
-                  <strong>Your output:</strong>
-                  <pre style={{ background: "#1e1e1e", color: "#d4d4d4", padding: 10, borderRadius: 4, margin: "4px 0 0", fontSize: 13 }}>
-                    {gradeResult.execution_output}
+              <p style={{ lineHeight: 1.7, color: "var(--text2)", fontSize: 14 }}>{exercise.problem}</p>
+              {exercise.expected_output && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginBottom: 6 }}>EXPECTED OUTPUT</div>
+                  <pre style={{ background: "var(--bg2)", padding: "10px 12px", borderRadius: 8, fontSize: 13, color: "var(--secondary)" }}>
+                    {exercise.expected_output}
                   </pre>
                 </div>
               )}
             </div>
-          )}
-        </>
+
+            {/* Grade Result */}
+            {gradeResult && (
+              <div className="card" style={{ border: `1px solid ${gradeColor}66` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <span style={{ fontSize: 24 }}>{gradeIcon}</span>
+                  <div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: gradeColor }}>
+                      {gradeResult.grade === "pass" ? "Passed!" : gradeResult.grade === "partial" ? "Partial Credit" : "Failed"}
+                    </div>
+                    <div style={{ fontSize: 13, color: "var(--text2)" }}>Score: {Math.round(gradeResult.score * 100)}%</div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.6, marginBottom: 12 }}>{gradeResult.feedback}</p>
+                {gradeResult.execution_output && (
+                  <>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginBottom: 6 }}>YOUR OUTPUT</div>
+                    <pre style={{ background: "#0d1117", color: "#e6edf3", padding: "10px 12px", borderRadius: 8, fontSize: 13 }}>
+                      {gradeResult.execution_output}
+                    </pre>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Editor */}
+          <div>
+            <div style={{ background: "var(--card)", borderRadius: "var(--radius)", overflow: "hidden", border: "1px solid var(--border)", marginBottom: 12 }}>
+              <div style={{ padding: "12px 16px", background: "var(--card2)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)" }}>SOLUTION.PY</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>Python 3</span>
+              </div>
+              <textarea
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                spellCheck={false}
+                style={{
+                  width: "100%",
+                  height: "340px",
+                  background: "#1e1e1e",
+                  color: "#d4d4d4",
+                  fontFamily: "'Courier New', Courier, monospace",
+                  fontSize: 14,
+                  padding: "12px 16px",
+                  border: "none",
+                  outline: "none",
+                  resize: "none",
+                  boxSizing: "border-box",
+                  lineHeight: 1.6,
+                }}
+              />
+            </div>
+            <button
+              className="btn btn-success btn-lg"
+              onClick={submitSolution}
+              disabled={grading}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              {grading ? "⏳ Grading..." : "🚀 Submit Solution"}
+            </button>
+          </div>
+        </div>
       )}
 
       {!exercise && !loading && (
-        <div style={{ textAlign: "center", color: "#999", padding: 40 }}>
-          Select a topic and click "New Exercise" to get started.
+        <div className="card" style={{ textAlign: "center", padding: "60px 24px" }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>🎯</div>
+          <h3 style={{ fontWeight: 600, marginBottom: 8 }}>Ready to practice?</h3>
+          <p style={{ color: "var(--text2)", fontSize: 14 }}>Select a topic above and click "Generate Exercise" to get started.</p>
         </div>
       )}
     </div>

@@ -5,13 +5,26 @@ import time
 from fastapi import FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dapr.clients import DaprClient
 from agents import Agent, Runner
 import uvicorn
 from prometheus_client import Counter, Histogram, make_asgi_app
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+async def _publish_event(pubsub_name, topic_name, data, data_content_type="application/json"):
+    """Non-blocking Dapr publish — skips if Dapr sidecar is unavailable."""
+    import asyncio
+    def _sync_publish():
+        from dapr.clients import DaprClient
+        with DaprClient() as dapr:
+            dapr.publish_event(pubsub_name=pubsub_name, topic_name=topic_name,
+                               data=data, data_content_type=data_content_type)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_sync_publish), timeout=2.0)
+    except Exception as e:
+        logger.warning(f"Dapr publish skipped ({topic_name}): {e}")
+
 
 app = FastAPI(title="triage-service")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -76,7 +89,7 @@ async def route_message(
     msg_lower = req.message.lower()
     if any(signal in msg_lower for signal in STRUGGLE_SIGNALS):
         struggle_triggered = True
-        _publish_struggle(student_id, req.session_id, "explicit_signal", req.message[:200])
+        await _publish_struggle(student_id, req.session_id, "explicit_signal", req.message[:200])
 
     # T024: OpenAI Agents SDK classification
     agent = Agent(
@@ -118,9 +131,7 @@ async def route_message(
         "classification": classification,
     }
     try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
+        await _publish_event(pubsub_name=DAPR_PUBSUB,
                 topic_name=kafka_topic,
                 data=json.dumps(event_data),
                 data_content_type="application/json",
@@ -141,7 +152,7 @@ async def route_message(
     )
 
 
-def _publish_struggle(student_id: str, session_id: str, trigger_type: str, detail: str):
+async def _publish_struggle(student_id: str, session_id: str, trigger_type: str, detail: str):
     event = {
         "student_id": student_id,
         "session_id": session_id,
@@ -149,9 +160,7 @@ def _publish_struggle(student_id: str, session_id: str, trigger_type: str, detai
         "trigger_detail": detail,
     }
     try:
-        with DaprClient() as dapr:
-            dapr.publish_event(
-                pubsub_name=DAPR_PUBSUB,
+        await _publish_event(pubsub_name=DAPR_PUBSUB,
                 topic_name="struggle.detected",
                 data=json.dumps(event),
                 data_content_type="application/json",
