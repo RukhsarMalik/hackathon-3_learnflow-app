@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/router'
 import '../styles/globals.css'
 
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL || 'http://localhost:30090'
+
 function Navbar() {
   const router = useRouter()
   const path = router.pathname
@@ -32,6 +34,15 @@ function Navbar() {
             {l.label}
           </Link>
         ))}
+        <a
+          href={DOCS_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="navbar-link"
+        >
+          <span>📚</span>
+          Docs
+        </a>
       </div>
     </nav>
   )

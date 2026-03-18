@@ -5,13 +5,14 @@
 $namespace = "learnflow"
 
 $services = @(
-    @{ Name = "kong-gateway";        From = 30080; To = 8000 },
-    @{ Name = "triage-service";      From = 8001;  To = 8000 },
-    @{ Name = "concepts-service";    From = 8002;  To = 8000 },
-    @{ Name = "code-review-service"; From = 8003;  To = 8000 },
-    @{ Name = "debug-service";       From = 8004;  To = 8000 },
-    @{ Name = "exercise-service";    From = 8005;  To = 8000 },
-    @{ Name = "progress-service";    From = 8006;  To = 8000 }
+    @{ Name = "kong-gateway";        From = 30080; To = 8000; Ns = "learnflow" },
+    @{ Name = "triage-service";      From = 8001;  To = 8000; Ns = "learnflow" },
+    @{ Name = "concepts-service";    From = 8002;  To = 8000; Ns = "learnflow" },
+    @{ Name = "code-review-service"; From = 8003;  To = 8000; Ns = "learnflow" },
+    @{ Name = "debug-service";       From = 8004;  To = 8000; Ns = "learnflow" },
+    @{ Name = "exercise-service";    From = 8005;  To = 8000; Ns = "learnflow" },
+    @{ Name = "progress-service";    From = 8006;  To = 8000; Ns = "learnflow" },
+    @{ Name = "docusaurus";          From = 30090; To = 80;   Ns = "docs"      }
 )
 
 $jobs = @()
@@ -25,14 +26,14 @@ foreach ($svc in $services) {
     $job = Start-Job -ScriptBlock {
         param($n, $p, $t, $ns)
         kubectl port-forward "svc/$n" "${p}:${t}" -n $ns
-    } -ArgumentList $svcName, $fromPort, $toPort, $namespace
+    } -ArgumentList $svcName, $fromPort, $toPort, $svc.Ns
 
     $jobs += $job
     Write-Host "  + $svcName -> localhost:$fromPort" -ForegroundColor Green
 }
 
 Write-Host ""
-Write-Host "All 7 services forwarded. Press Ctrl+C to stop." -ForegroundColor Yellow
+Write-Host "All 8 services forwarded. Press Ctrl+C to stop." -ForegroundColor Yellow
 
 try {
     while ($true) {

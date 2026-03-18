@@ -32,6 +32,8 @@ const LEVEL_COLORS: Record<string, string> = {
   Beginner: "#ff6b6b",
 };
 
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL || "http://localhost:30090";
+
 const NAV_CARDS = [
   {
     href: "/tutor",
@@ -53,6 +55,14 @@ const NAV_CARDS = [
     title: "My Progress",
     desc: "Track your mastery levels across all Python topics",
     color: "#ffa94d",
+  },
+  {
+    href: DOCS_URL,
+    icon: "📚",
+    title: "Docs",
+    desc: "LearnFlow architecture, API reference, and service documentation",
+    color: "#ff6b9d",
+    external: true,
   },
 ];
 
@@ -113,15 +123,15 @@ export default function TeacherDashboard() {
 
       {/* Nav Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, marginBottom: 48 }}>
-        {NAV_CARDS.map((card) => (
-          <Link key={card.href} href={card.href} style={{ textDecoration: "none" }}>
+        {NAV_CARDS.map((card) => {
+          const cardContent = (
             <div
               className="card"
               style={{
                 cursor: "pointer",
                 transition: "all 0.2s",
                 borderColor: "transparent",
-                background: `linear-gradient(135deg, var(--card) 0%, rgba(${card.color === "#6c63ff" ? "108,99,255" : card.color === "#00c9a7" ? "0,201,167" : "255,169,77"},0.08) 100%)`,
+                background: `linear-gradient(135deg, var(--card) 0%, rgba(${card.color === "#6c63ff" ? "108,99,255" : card.color === "#00c9a7" ? "0,201,167" : card.color === "#ffa94d" ? "255,169,77" : "255,107,157"},0.08) 100%)`,
               }}
               onMouseEnter={e => {
                 (e.currentTarget as HTMLElement).style.transform = "translateY(-4px)";
@@ -149,8 +159,17 @@ export default function TeacherDashboard() {
                 Open {card.title} →
               </div>
             </div>
-          </Link>
-        ))}
+          );
+          return "external" in card && card.external ? (
+            <a key={card.href} href={card.href} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+              {cardContent}
+            </a>
+          ) : (
+            <Link key={card.href} href={card.href} style={{ textDecoration: "none" }}>
+              {cardContent}
+            </Link>
+          );
+        })}
       </div>
 
       {/* Teacher Dashboard Section */}
